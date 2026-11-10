@@ -1,0 +1,43 @@
+name: CI_build
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install MSYS2 UCRT64 tools
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-binutils
+          update: true
+          release: true
+
+      - name: Build and package x64 plugin
+        env:
+          MSYS2_ROOT: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          $env:MSYSTEM = 'UCRT64'
+          $tools = Join-Path $env:MSYS2_ROOT 'ucrt64\bin'
+          $env:Path = $tools + [IO.Path]::PathSeparator + $env:Path
+          .\build-x64.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload x64 release ZIP
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/NppGdiEmoji-*-x64.zip
+          if-no-files-found: error
+          archive: false
