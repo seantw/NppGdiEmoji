@@ -34,7 +34,7 @@ Add x64 MinGW-w64 (`g++.exe` and `windres.exe`) to `PATH`, then run the batch fi
 .\build-x64.bat
 ```
 
-Source files are in `src\`. The script creates `build\NppGdiEmoji.dll` and `release\NppGdiEmoji-0.1.0-x64.zip`, then prints the ZIP's SHA-256. Both output directories are ignored by Git. The DLL includes a Windows version resource.
+Source files are in `src\`. The script creates `build\NppGdiEmoji.dll` and `release\NppGdiEmoji-<version>-x64.zip`, then prints the ZIP's SHA-256. Both output directories are ignored by Git. The DLL includes a Windows version resource.
 
 ## License
 

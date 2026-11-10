@@ -209,7 +209,14 @@ void syncRepresentations(HWND view, bool active, ViewState& state) {
     }
     state.placeholderWidth = width;
     state.emojiSize = size;
-    if (placeholder == state.placeholder) return;
+    if (placeholder == state.placeholder) {
+        if (state.owned.empty()) return;
+
+        // Scintilla can reset all representations when the document changes.
+        char encoded[5];
+        encodeEmoji(state.owned.front(), encoded);
+        if (sci(view, GetRepresentation, reinterpret_cast<WPARAM>(encoded)) != 0) return;
+    }
 
     if (state.placeholder.empty()) {
         for (const auto& range : EmojiRanges) {
@@ -229,13 +236,13 @@ void syncRepresentations(HWND view, bool active, ViewState& state) {
             encodeEmoji(codePoint, encoded);
             const auto key = reinterpret_cast<WPARAM>(encoded);
             char current[MaxRepresentationBytes + 1]{};
-            const auto size = sci(view, GetRepresentation, key);
-            if (size != static_cast<LRESULT>(state.placeholder.size()) ||
-                sci(view, GetRepresentation, key, reinterpret_cast<LPARAM>(current)) != size ||
-                state.placeholder != current)
+            const auto length = sci(view, GetRepresentation, key);
+            if (length != 0 && (length != static_cast<LRESULT>(state.placeholder.size()) ||
+                sci(view, GetRepresentation, key, reinterpret_cast<LPARAM>(current)) != length ||
+                state.placeholder != current))
                 return true;
             if (placeholder.empty()) {
-                sci(view, ClearRepresentation, key);
+                if (length != 0) sci(view, ClearRepresentation, key);
                 return true;
             }
             sci(view, SetRepresentation, key, reinterpret_cast<LPARAM>(placeholder.c_str()));
