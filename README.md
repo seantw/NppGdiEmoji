@@ -1,46 +1,45 @@
 # GDI Emoji for Notepad++
 
-GDI Emoji draws color emoji in UTF-8 documents in Notepad++'s GDI mode. The emoji drawing area targets the measured width of a CJK character in the default editor style, capped by the line height. Scintilla reserves a matching or slightly wider space and handles text layout, caret movement, and selection. Document bytes stay intact.
+GDI Emoji displays color emoji and monochrome symbols in UTF-8 documents in Notepad++'s GDI mode. It draws each symbol within a square about as wide as a CJK character, subject to the line height and available space. The plugin leaves the document text intact.
 
-## Install and try it
+## Install
 
-Close Notepad++ x64, copy `NppGdiEmoji.dll` to `plugins\NppGdiEmoji\` under your Notepad++ folder, and restart Notepad++.
+GDI Emoji supports Notepad++ x64 on Windows 10 and 11. Look for **GDI Emoji** in **Plugins → Plugins Admin**. To install manually, download the x64 ZIP from [Releases](https://github.com/seantw/NppGdiEmoji/releases), close Notepad++, and extract `NppGdiEmoji.dll` to `plugins\NppGdiEmoji\` under your Notepad++ folder. Then restart Notepad++.
 
-In **Settings → Preferences → MISC.**, select **GDI (most compatible)**. Open a UTF-8 document to see supported emoji automatically.
+In **Settings → Preferences → MISC.**, select **GDI (most compatible)**. Open a UTF-8 document to see the plugin in action.
 
 ![GDI rendering mode in Notepad++ preferences](screenshot/setting.png)
 
-Paste these lines to check alignment, caret movement, and scrolling:
+## Try it
+
+Paste these lines to compare text and emoji presentation, check spacing, and try selection:
 
 ```text
-A😀B A🚀B A👍B A✅B
-A★B A♥B A☺B A❤️B
-ABC 中文 123
+中✈中　中✈️中　中❤中　中❤️中
+中😀中　中🇻🇳中　中👍🏽中　中1️⃣中
+中👩‍💻中　中👩🏽‍💻中　中🏳️‍🌈中
 ```
 
-The first line uses supported single-code-point emoji. The second line compares plain symbols with an emoji variation sequence. To compare text and emoji presentation directly, try `A✈B A✈️B A❤B A❤️B`.
+- Color emoji use **Segoe UI Emoji**. Supported text-style symbols such as `✈`, `❤`, and `✌` use **Segoe UI Symbol** and follow the editor's text color.
+- Supported sequences include emoji presentation variants, country flags, subdivision flags for England, Scotland, and Wales, skin tones, keycaps, and joined emoji of up to eight elements.
+- With a single caret, the Left and Right keys skip over supported sequences. Shift navigation and mouse selection snap to sequence boundaries. Drag selections snap when you release the mouse button.
 
-## Preview limitations
+## Display limitations
 
-- Supported text-default symbols such as ✈, ❤, and ✌ use the installed Segoe UI Symbol font and the editor style's foreground color. An emoji presentation sequence such as ✈️ uses Segoe UI Emoji.
-
-- This build targets Windows 10/11 and Notepad++ x64 in GDI mode with UTF-8 documents. Color glyph coverage depends on Windows' Segoe UI Emoji font.
-- The overlay supports standalone emoji with the `Emoji_Presentation` property and sends supported presentation variants, flags, skin-tone sequences, keycaps, and ZWJ sequences to the emoji font as complete sequences. Tag flags cover England, Scotland, and Wales. ZWJ sequences can contain up to eight elements. Sequence drawing targets a CJK character's width within the space Scintilla allocates. When the sequence crosses a visual line or the cell background is uneven, Scintilla paints the sequence.
-- With a single caret, Left and Right arrow keys and plain clicks move the caret to supported sequence boundaries. Shift navigation and mouse selections also snap to sequence boundaries. Mouse selections are adjusted when the button is released.
-- In GDI mode, U+FE0F reserves blank space as close to half a CJK character's width as the current font allows. This applies to every occurrence of the selector, including in sequences outside the overlay's coverage, and may affect wrapping.
-- For documents up to 256 KiB, the overlay can compact 👩‍💻, 🏳️‍🌈, country flags, skin-tone sequences, tag flags, and keycaps with U+FE0F. Width changes apply only when the affected characters are used exclusively in sequences eligible for compaction and the font supports the required zero-width placeholder.
-- The overlay scans up to the first 256 KiB of each visible document line.
-- With word wrap enabled, the editor keeps its original glyphs and widths. The overlay can redraw an emoji in color when it fits on a single visual line. A sequence split across rows uses the editor's own rendering.
+- The installed Windows fonts determine which glyphs are available and how they look.
+- With word wrap enabled, the plugin keeps Scintilla's original spacing. It can redraw a sequence on one visual line when the background allows it. Sequences split across visual lines use the editor's own rendering.
+- With word wrap disabled, U+FE0F reserves about half a CJK character's width. In documents up to 256 KiB, the plugin can reduce excess spacing for certain sequences if the affected characters occur only in eligible sequences and the editor font supports the required zero-width placeholder.
+- The plugin scans up to the first 256 KiB of each visible document line.
 
 ## Build
 
-Add x64 MinGW-w64 (`g++.exe` and `windres.exe`) to `PATH`, then run the batch file from the project root. Packaging uses Windows' built-in PowerShell, `tar.exe`, and `certutil.exe`. The build has been checked with Strawberry Perl's toolchain.
+Add x64 MinGW-w64 (`g++.exe` and `windres.exe`) to `PATH`, then run the batch file from the project root. The script uses PowerShell, `tar.exe`, and `certutil.exe` to package the build and print the ZIP's SHA-256.
 
 ```bat
 .\build-x64.bat
 ```
 
-Source files are in `src\`. The script creates `build\NppGdiEmoji.dll` and `release\NppGdiEmoji-<version>-x64.zip`, then prints the ZIP's SHA-256. Both output directories are ignored by Git. The DLL includes a Windows version resource.
+Source files are in `src\`. The build writes `build\NppGdiEmoji.dll` and packages it as `release\NppGdiEmoji-<version>-x64.zip`. Git ignores both output directories.
 
 ## License
 
