@@ -18,13 +18,19 @@ A★B A♥B A☺B A❤️B
 ABC 中文 123
 ```
 
-The first line uses supported single-code-point emoji. The second line contains text-default symbols and an emoji variation sequence, which this build leaves to Notepad++.
+The first line uses supported single-code-point emoji. The second line compares plain symbols with an emoji variation sequence. To compare text and emoji presentation directly, try `A✈B A✈️B A❤B A❤️B`.
 
 ## Preview limitations
 
+- Supported text-default symbols such as ✈, ❤, and ✌ use the installed Segoe UI Symbol font and the editor style's foreground color. An emoji presentation sequence such as ✈️ uses Segoe UI Emoji.
+
 - This build targets Windows 10/11 and Notepad++ x64 in GDI mode with UTF-8 documents. Color glyph coverage depends on Windows' Segoe UI Emoji font.
-- The overlay supports characters with Unicode's `Emoji_Presentation` property, excluding `Emoji_Component` characters such as regional indicators and skin-tone modifiers. A flag, skin-tone sequence, keycap, ZWJ sequence, or variation sequence is not laid out and painted as a single emoji. A supported base character inside a sequence can still be drawn individually.
+- The overlay supports standalone emoji with the `Emoji_Presentation` property and sends supported presentation variants, flags, skin-tone sequences, keycaps, and ZWJ sequences to the emoji font as complete sequences. Tag flags cover England, Scotland, and Wales. ZWJ sequences can contain up to eight elements. Sequence drawing targets a CJK character's width within the space Scintilla allocates. When the sequence crosses a visual line or the cell background is uneven, Scintilla paints the sequence.
+- With a single caret, Left and Right arrow keys and plain clicks move the caret to supported sequence boundaries. Shift navigation and mouse selections also snap to sequence boundaries. Mouse selections are adjusted when the button is released.
+- In GDI mode, U+FE0F reserves blank space as close to half a CJK character's width as the current font allows. This applies to every occurrence of the selector, including in sequences outside the overlay's coverage, and may affect wrapping.
+- For documents up to 256 KiB, the overlay can compact 👩‍💻, 🏳️‍🌈, country flags, skin-tone sequences, tag flags, and keycaps with U+FE0F. Width changes apply only when the affected characters are used exclusively in sequences eligible for compaction and the font supports the required zero-width placeholder.
 - The overlay scans up to the first 256 KiB of each visible document line.
+- With word wrap enabled, the editor keeps its original glyphs and widths. The overlay can redraw an emoji in color when it fits on a single visual line. A sequence split across rows uses the editor's own rendering.
 
 ## Build
 
