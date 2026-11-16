@@ -554,13 +554,19 @@ void snapSelectedEmoji(HWND view, LRESULT previousCaret = -1, bool keyboard = fa
         sci(view, SetSel, newAnchor, newCaret);
 }
 
-COLORREF uniformCellBackground(HDC dc, int left, int top, int right, int bottom) {
+struct PreservedPixel {
+    int x;
+    int y;
+    COLORREF color;
+};
+
+COLORREF cellBackgroundFromTopEdge(HDC dc, int left, int top, int right) {
     if (left >= right) return CLR_INVALID;
     const auto color = GetPixel(dc, left, top);
     if (color == CLR_INVALID) return color;
     for (int x = left; x < right; ++x) {
-        if (GetPixel(dc, x, top) != color || GetPixel(dc, x, bottom - 1) != color)
-            return CLR_INVALID;
+        const auto topColor = GetPixel(dc, x, top);
+        if (topColor != color) return CLR_INVALID;
     }
     return color;
 }
@@ -588,6 +594,7 @@ void paintEmoji(HWND view, HDC dc, const RECT& client, ViewState& state, const W
     const auto caretPos = sci(view, GetCurrentPos);
     const auto caretWidth = sci(view, GetCaretWidth);
     const auto caretColor = static_cast<COLORREF>(sci(view, GetCaretFore));
+    std::vector<PreservedPixel> preservedBottomPixels;
 
     ID2D1DCRenderTarget* target = nullptr;
     ID2D1SolidColorBrush* brush = nullptr;
@@ -634,8 +641,7 @@ void paintEmoji(HWND view, HDC dc, const RECT& client, ViewState& state, const W
             if (!utf16Length) continue;
             const auto x = sci(view, PointXFromPosition, 0, position);
             const auto y = sci(view, PointYFromPosition, 0, position);
-            if (x >= client.right || y >= client.bottom || y + height <= 0)
-                continue;
+            if (x >= client.right || y >= client.bottom || y + height <= 0) continue;
 
             const auto nextX = sci(view, PointXFromPosition, 0, position + byteCount);
             const auto nextY = sci(view, PointYFromPosition, 0, position + byteCount);
@@ -647,9 +653,9 @@ void paintEmoji(HWND view, HDC dc, const RECT& client, ViewState& state, const W
             COLORREF background = CLR_INVALID;
             if (replaceText) {
                 // The editor already painted this sequence. Cover its glyphs
-                // only when the sequence fits on one row and has a uniform background.
-                if (nextY != y || y < 0 || y + height > client.bottom || height < 3)
-                    continue;
+                // only when the sequence fits on one row and its top edge has a
+                // consistent background color.
+                if (nextY != y || y < 0 || y + height > client.bottom || height < 3) continue;
                 auto cellLeft = std::max(x, left);
                 auto cellRight = std::min<LRESULT>(nextX, client.right);
                 const auto isCaretColumn = [&](LRESULT column) {
@@ -666,8 +672,17 @@ void paintEmoji(HWND view, HDC dc, const RECT& client, ViewState& state, const W
                 if (caretPos == position + byteCount && nextX <= client.right &&
                     cellLeft < cellRight && isCaretColumn(cellRight - 1))
                     --cellRight;
-                background = uniformCellBackground(dc, cellLeft, y, cellRight, y + height);
+                background = cellBackgroundFromTopEdge(dc, cellLeft, y, cellRight);
                 if (background == CLR_INVALID) continue;
+                // Scintilla indicators and theme decorations can color the bottom
+                // row without changing the cell background. Keep those pixels while
+                // replacing the editor's missing-glyph drawing.
+                const auto bottomY = static_cast<int>(y) + static_cast<int>(height) - 1;
+                for (auto column = cellLeft; column < cellRight; ++column) {
+                    const auto pixel = GetPixel(dc, column, bottomY);
+                    if (pixel != CLR_INVALID && pixel != background)
+                        preservedBottomPixels.push_back({ static_cast<int>(column), bottomY, pixel });
+                }
                 cell = D2D1::RectF(cellLeft, y, cellRight, y + height);
             }
 
@@ -761,6 +776,8 @@ void paintEmoji(HWND view, HDC dc, const RECT& client, ViewState& state, const W
         brush->Release();
         target->Release();
     }
+    for (const auto& pixel : preservedBottomPixels)
+        SetPixel(dc, pixel.x, pixel.y, pixel.color);
 }
 
 void encodeEmoji(char32_t codePoint, char (&key)[5]) {
