@@ -20,7 +20,8 @@ Paste these lines to compare text and emoji presentation, check spacing, and try
 中👩‍💻中　中👩🏽‍💻中　中🏳️‍🌈中
 ```
 
-- Color emoji use **Segoe UI Emoji**. Supported text-style symbols such as `✈`, `❤`, and `✌` use **Segoe UI Symbol** and follow the editor's text color.
+- Color emoji use **Segoe UI Emoji** by default. In **Plugins → GDI Emoji → Emoji Font**, choose an installed font that DirectWrite detects as a color emoji font. Supported text-style symbols such as `✈`, `❤`, and `✌` use **Segoe UI Symbol** and follow the editor's text color.
+- Choose **Disable** in the GDI Emoji plugin menu to stop emoji rendering and restore the editor's original spacing. The menu item becomes **Enable** so you can turn the plugin back on without restarting Notepad++.
 - Supported sequences include emoji presentation variants, country flags, subdivision flags for England, Scotland, and Wales, skin tones, keycaps, and joined emoji of up to eight elements.
 - With a single caret, the Left and Right keys skip over supported sequences. Shift navigation and mouse selection snap to sequence boundaries. Drag selections snap when you release the mouse button.
 

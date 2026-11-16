@@ -3,8 +3,10 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <dwrite_3.h>
 #include <algorithm>
 #include <bitset>
 #include <cstdlib>
@@ -106,10 +108,190 @@ struct ViewState {
 };
 ViewState mainState;
 ViewState secondState;
+void releaseGraphics(ViewState& state);
 bool enabled = false;
 ID2D1Factory* d2d = nullptr;
 IDWriteFactory* dwrite = nullptr;
 IDWriteFont* symbolFont = nullptr;
+constexpr wchar_t DefaultEmojiFont[] = L"Segoe UI Emoji";
+std::wstring emojiFontName = DefaultEmojiFont;
+std::vector<std::wstring> availableEmojiFonts;
+HMENU emojiFontMenu = nullptr;
+HMENU gdiPluginMenu = nullptr;
+constexpr UINT_PTR MainWindowSubclassId = 2;
+constexpr UINT EmojiFontCommandFirst = 0xFF00;
+constexpr UINT EmojiFontCommandLast = EmojiFontCommandFirst + 0x00FF;
+
+std::wstring settingsPath() {
+    wchar_t appData[MAX_PATH]{};
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA | CSIDL_FLAG_CREATE, nullptr,
+        SHGFP_TYPE_CURRENT, appData))) return {};
+    std::wstring directory = appData;
+    directory += L"\\Notepad++\\plugins\\config";
+    CreateDirectoryW((std::wstring(appData) + L"\\Notepad++").c_str(), nullptr);
+    CreateDirectoryW((std::wstring(appData) + L"\\Notepad++\\plugins").c_str(), nullptr);
+    CreateDirectoryW(directory.c_str(), nullptr);
+    return directory + L"\\NppGdiEmoji.ini";
+}
+
+void loadEmojiFont() {
+    const auto path = settingsPath();
+    if (path.empty()) return;
+    wchar_t value[256]{};
+    GetPrivateProfileStringW(L"Font", L"EmojiFont", DefaultEmojiFont, value,
+        ARRAYSIZE(value), path.c_str());
+    emojiFontName = value;
+}
+
+void saveEmojiFont() {
+    const auto path = settingsPath();
+    if (!path.empty()) WritePrivateProfileStringW(L"Font", L"EmojiFont", emojiFontName.c_str(), path.c_str());
+}
+
+void enumerateEmojiFonts() {
+    availableEmojiFonts.clear();
+    if (!dwrite) return;
+    IDWriteFontCollection* collection = nullptr;
+    if (FAILED(dwrite->GetSystemFontCollection(&collection))) return;
+    constexpr DWRITE_GLYPH_IMAGE_FORMATS colorFormats = static_cast<DWRITE_GLYPH_IMAGE_FORMATS>(
+        DWRITE_GLYPH_IMAGE_FORMATS_COLR | DWRITE_GLYPH_IMAGE_FORMATS_SVG |
+        DWRITE_GLYPH_IMAGE_FORMATS_PNG | DWRITE_GLYPH_IMAGE_FORMATS_JPEG |
+        DWRITE_GLYPH_IMAGE_FORMATS_TIFF | DWRITE_GLYPH_IMAGE_FORMATS_PREMULTIPLIED_B8G8R8A8);
+    for (UINT32 i = 0; i < collection->GetFontFamilyCount(); ++i) {
+        IDWriteFontFamily* family = nullptr;
+        IDWriteFont* font = nullptr;
+        IDWriteFontFace* baseFace = nullptr;
+        IDWriteFontFace4* face = nullptr;
+        IDWriteLocalizedStrings* names = nullptr;
+        if (FAILED(collection->GetFontFamily(i, &family)) || !family) continue;
+        if (SUCCEEDED(family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &font)) && font &&
+            SUCCEEDED(font->CreateFontFace(&baseFace)) && baseFace &&
+            SUCCEEDED(baseFace->QueryInterface(__uuidof(IDWriteFontFace4), reinterpret_cast<void**>(&face))) && face &&
+            (face->GetGlyphImageFormats() & colorFormats) != 0 &&
+            SUCCEEDED(family->GetFamilyNames(&names)) && names) {
+            UINT32 length = 0, localeIndex = 0;
+            BOOL exists = FALSE;
+            names->FindLocaleName(L"en-us", &localeIndex, &exists);
+            if (!exists) localeIndex = 0;
+            if (SUCCEEDED(names->GetStringLength(localeIndex, &length))) {
+                std::wstring name(length + 1, L'\0');
+                if (SUCCEEDED(names->GetString(localeIndex, name.data(), length + 1))) {
+                    name.resize(length);
+                    BOOL hasGrinningFace = FALSE;
+                    if (SUCCEEDED(font->HasCharacter(0x1F600, &hasGrinningFace)) && hasGrinningFace)
+                        availableEmojiFonts.push_back(std::move(name));
+                }
+            }
+        }
+        if (names) names->Release();
+        if (face) face->Release();
+        if (baseFace) baseFace->Release();
+        if (font) font->Release();
+        family->Release();
+    }
+    collection->Release();
+    std::sort(availableEmojiFonts.begin(), availableEmojiFonts.end());
+    availableEmojiFonts.erase(std::unique(availableEmojiFonts.begin(), availableEmojiFonts.end()),
+        availableEmojiFonts.end());
+    if (std::find(availableEmojiFonts.begin(), availableEmojiFonts.end(), emojiFontName) == availableEmojiFonts.end()) {
+        emojiFontName = DefaultEmojiFont;
+        saveEmojiFont();
+    }
+}
+
+void applyEmojiFont(size_t index) {
+    if (index >= availableEmojiFonts.size()) return;
+    emojiFontName = availableEmojiFonts[index];
+    saveEmojiFont();
+    releaseGraphics(mainState);
+    releaseGraphics(secondState);
+    InvalidateRect(windows.mainView, nullptr, FALSE);
+    InvalidateRect(windows.secondView, nullptr, FALSE);
+}
+
+LRESULT CALLBACK mainWindowProc(HWND window, UINT message, WPARAM w, LPARAM l,
+    UINT_PTR, DWORD_PTR) {
+    size_t index = availableEmojiFonts.size();
+    if (message == WM_MENUCOMMAND && reinterpret_cast<HMENU>(l) == emojiFontMenu) {
+        index = static_cast<size_t>(w);
+    } else if (message == WM_COMMAND && l == 0) {
+        const UINT command = LOWORD(w);
+        if (command >= EmojiFontCommandFirst && command <= EmojiFontCommandLast)
+            index = static_cast<size_t>(command - EmojiFontCommandFirst);
+    }
+    if (index < availableEmojiFonts.size()) {
+        applyEmojiFont(index);
+        if (emojiFontMenu)
+            CheckMenuRadioItem(emojiFontMenu, 0,
+                static_cast<UINT>(availableEmojiFonts.size()) - 1, static_cast<UINT>(index), MF_BYPOSITION);
+        return 0;
+    }
+    return DefSubclassProc(window, message, w, l);
+}
+
+void installEmojiFontSubmenu() {
+    if (!windows.npp) return;
+    enumerateEmojiFonts();
+    HMENU plugins = reinterpret_cast<HMENU>(SendMessageW(windows.npp, WM_USER + 1025, 0, 0));
+    if (!plugins) return;
+    HMENU pluginMenu = nullptr;
+    const int pluginCount = GetMenuItemCount(plugins);
+    for (int i = 0; i < pluginCount; ++i) {
+        wchar_t label[128]{};
+        GetMenuStringW(plugins, i, label, ARRAYSIZE(label), MF_BYPOSITION);
+        if (wcscmp(label, L"GDI Emoji") == 0) {
+            pluginMenu = GetSubMenu(plugins, i);
+            break;
+        }
+    }
+    if (!pluginMenu) return;
+    gdiPluginMenu = pluginMenu;
+    if (emojiFontMenu) return;
+
+    int fontItem = -1;
+    const int itemCount = GetMenuItemCount(pluginMenu);
+    for (int i = 0; i < itemCount; ++i) {
+        wchar_t label[128]{};
+        GetMenuStringW(pluginMenu, i, label, ARRAYSIZE(label), MF_BYPOSITION);
+        if (wcscmp(label, L"Emoji Font") == 0) { fontItem = i; break; }
+    }
+    if (fontItem < 0 || availableEmojiFonts.empty() ||
+        availableEmojiFonts.size() > EmojiFontCommandLast - EmojiFontCommandFirst + 1) return;
+    if (!SetWindowSubclass(windows.npp, mainWindowProc, MainWindowSubclassId, 0)) return;
+
+    emojiFontMenu = CreatePopupMenu();
+    if (!emojiFontMenu) {
+        RemoveWindowSubclass(windows.npp, mainWindowProc, MainWindowSubclassId);
+        return;
+    }
+    MENUINFO menuInfo{};
+    menuInfo.cbSize = sizeof(menuInfo);
+    menuInfo.fMask = MIM_STYLE;
+    menuInfo.dwStyle = MNS_NOTIFYBYPOS;
+    SetMenuInfo(emojiFontMenu, &menuInfo);
+    for (size_t i = 0; i < availableEmojiFonts.size(); ++i)
+        AppendMenuW(emojiFontMenu, MF_STRING, EmojiFontCommandFirst + static_cast<UINT>(i),
+            availableEmojiFonts[i].c_str());
+    const auto selected = std::find(availableEmojiFonts.begin(), availableEmojiFonts.end(), emojiFontName);
+    if (selected != availableEmojiFonts.end())
+        CheckMenuRadioItem(emojiFontMenu, 0, static_cast<UINT>(availableEmojiFonts.size()) - 1,
+            static_cast<UINT>(selected - availableEmojiFonts.begin()), MF_BYPOSITION);
+
+    MENUITEMINFOW item{};
+    item.cbSize = sizeof(item);
+    item.fMask = MIIM_FTYPE | MIIM_SUBMENU | MIIM_STRING;
+    item.fType = MFT_STRING;
+    item.hSubMenu = emojiFontMenu;
+    item.dwTypeData = const_cast<wchar_t*>(L"Emoji Font");
+    if (!SetMenuItemInfoW(pluginMenu, static_cast<UINT>(fontItem), TRUE, &item)) {
+        DestroyMenu(emojiFontMenu);
+        emojiFontMenu = nullptr;
+        RemoveWindowSubclass(windows.npp, mainWindowProc, MainWindowSubclassId);
+        return;
+    }
+    DrawMenuBar(windows.npp);
+}
 
 LRESULT sci(HWND view, Sci message, WPARAM w = 0, LPARAM l = 0) {
     return SendMessageW(view, message, w, l);
@@ -496,7 +678,7 @@ void paintEmoji(HWND view, HDC dc, const RECT& client, ViewState& state, const W
                     state.format = nullptr;
                     if (state.symbolFormat) state.symbolFormat->Release();
                     state.symbolFormat = nullptr;
-                    if (FAILED(dwrite->CreateTextFormat(L"Segoe UI Emoji", nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                    if (FAILED(dwrite->CreateTextFormat(emojiFontName.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
                         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, L"", &state.format)))
                         return;
                     state.format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
@@ -931,6 +1113,41 @@ void disable() {
     dwrite = nullptr;
 }
 
+void enable();
+
+void setActiveMenuLabel(bool active) {
+    if (!gdiPluginMenu) return;
+    const wchar_t* oldLabel = active ? L"Enable" : L"Disable";
+    const wchar_t* newLabel = active ? L"Disable" : L"Enable";
+    for (int i = 0; i < GetMenuItemCount(gdiPluginMenu); ++i) {
+        wchar_t label[64]{};
+        GetMenuStringW(gdiPluginMenu, i, label, ARRAYSIZE(label), MF_BYPOSITION);
+        if (wcscmp(label, oldLabel) != 0) continue;
+        MENUITEMINFOW item{};
+        item.cbSize = sizeof(item);
+        item.fMask = MIIM_STRING;
+        item.dwTypeData = const_cast<wchar_t*>(newLabel);
+        SetMenuItemInfoW(gdiPluginMenu, static_cast<UINT>(i), TRUE, &item);
+        DrawMenuBar(windows.npp);
+        return;
+    }
+}
+
+void togglePlugin() {
+    if (enabled) {
+        disable();
+        setActiveMenuLabel(false);
+        return;
+    }
+    enable();
+    if (enabled) setActiveMenuLabel(true);
+}
+
+void shutdownPlugin() {
+    disable();
+    RemoveWindowSubclass(windows.npp, mainWindowProc, MainWindowSubclassId);
+}
+
 void enable() {
     if (enabled) return;
     if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2d)) ||
@@ -955,6 +1172,7 @@ void enable() {
         }
         fonts->Release();
     }
+    enumerateEmojiFonts();
     enabled = true;
     InvalidateRect(windows.mainView, nullptr, FALSE);
     InvalidateRect(windows.secondView, nullptr, FALSE);
@@ -969,13 +1187,19 @@ void about() {
     }
 }
 
-FuncItem menu[] = {{L"About NppGdiEmoji", about, 0, false, nullptr}};
+void fontMenuPlaceholder() {}
+
+FuncItem menu[] = {
+    {L"Emoji Font", fontMenuPlaceholder, 0, false, nullptr},
+    {L"Disable", togglePlugin, 0, false, nullptr},
+    {L"About NppGdiEmoji", about, 0, false, nullptr}
+};
 }
 
 extern "C" {
 __declspec(dllexport) void setInfo(NppData data) { windows = data; }
 __declspec(dllexport) const wchar_t* getName() { return L"GDI Emoji"; }
-__declspec(dllexport) FuncItem* getFuncsArray(int* count) { *count = 1; return menu; }
+__declspec(dllexport) FuncItem* getFuncsArray(int* count) { *count = ARRAYSIZE(menu); return menu; }
 __declspec(dllexport) void beNotified(NMHDR* notification) {
     constexpr UINT NppReady = 1001;
     constexpr UINT NppShutdown = 1009;
@@ -1002,8 +1226,12 @@ __declspec(dllexport) void beNotified(NMHDR* notification) {
             secondState.scanDirty = true;
         }
     }
-    if (notification->code == NppReady) enable();
-    if (notification->code == NppShutdown) disable();
+    if (notification->code == NppReady) {
+        loadEmojiFont();
+        enable();
+        if (enabled) installEmojiFontSubmenu();
+    }
+    if (notification->code == NppShutdown) shutdownPlugin();
 }
 __declspec(dllexport) LRESULT messageProc(UINT, WPARAM, LPARAM) { return TRUE; }
 __declspec(dllexport) BOOL isUnicode() { return TRUE; }
